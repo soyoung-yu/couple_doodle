@@ -1,15 +1,14 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react'
-import { Heart, MessageCircle, Send, X, Lock } from 'lucide-react'
+import React, { useEffect, useRef, useState } from 'react'
+import { Heart, MessageCircle, Send, X, Lock, Trash2 } from 'lucide-react'
 import { supabase } from './supabaseClient'
 
-// ---- 설정: 로그인 허용 사용자/암호 ----
+// ---- 로그인 허용 사용자/암호 ----
 const VALID_CREDENTIALS = {
   '귀연': '951027',
   '소영': '000521'
 }
 
 export default function CoupleDiary() {
-  // 상태
   const [isAuthenticated, setIsAuthenticated] = useState(false)
   const [userName, setUserName] = useState('')
   const [passwordInput, setPasswordInput] = useState('')
@@ -19,49 +18,29 @@ export default function CoupleDiary() {
   const [selectedPost, setSelectedPost] = useState(null) // {..., comments:[]}
   const [newComment, setNewComment] = useState('')
   const [isLoading, setIsLoading] = useState(false)
-
-  // 파일 선택(백업/복원 필요 시 사용)
   const fileInputRef = useRef(null)
 
-  // 로그인
   const handleLogin = () => {
-    if (!passwordInput || !secretCode) {
-      alert('모든 항목을 입력해주세요!')
-      return
-    }
+    if (!passwordInput || !secretCode) { alert('모든 항목을 입력해주세요!'); return }
     if (VALID_CREDENTIALS[passwordInput] === secretCode) {
-      setUserName(passwordInput)
-      setIsAuthenticated(true)
-      setPasswordInput('')
-      setSecretCode('')
+      setUserName(passwordInput); setIsAuthenticated(true)
+      setPasswordInput(''); setSecretCode('')
     } else {
-      alert('올바른 정보를 입력해주세요!')
-      setPasswordInput('')
-      setSecretCode('')
+      alert('올바른 정보를 입력해주세요!'); setPasswordInput(''); setSecretCode('')
     }
   }
 
-  // 날짜 포맷
   const formatDate = (ts) => {
     const d = new Date(ts)
-    const y = d.getFullYear()
-    const m = String(d.getMonth() + 1).padStart(2, '0')
-    const day = String(d.getDate()).padStart(2, '0')
-    const hh = String(d.getHours()).padStart(2, '0')
-    const mm = String(d.getMinutes()).padStart(2, '0')
-    return `${y}.${m}.${day} ${hh}:${mm}`
+    const z = (n) => String(n).padStart(2, '0')
+    return `${d.getFullYear()}.${z(d.getMonth() + 1)}.${z(d.getDate())} ${z(d.getHours())}:${z(d.getMinutes())}`
   }
 
-  // 게시글 목록 로딩(+ 댓글 수 집계)
   const loadPosts = async () => {
     setIsLoading(true)
     try {
-      const { data, error } = await supabase
-        .from('posts')
-        .select('*')
-        .order('created_at', { ascending: false })
+      const { data, error } = await supabase.from('posts').select('*').order('created_at', { ascending: false })
       if (error) throw error
-
       const base = (data || []).map(p => ({
         id: p.id,
         author: p.author,
@@ -69,8 +48,6 @@ export default function CoupleDiary() {
         timestamp: new Date(p.created_at).getTime(),
         comments_count: 0
       }))
-
-      // 댓글 수 집계(소규모라 간단히 per-post count)
       const withCounts = await Promise.all(base.map(async (p) => {
         const { count } = await supabase
           .from('comments')
@@ -78,51 +55,37 @@ export default function CoupleDiary() {
           .eq('post_id', p.id)
         return { ...p, comments_count: count || 0 }
       }))
-
       setPosts(withCounts)
     } catch (e) {
-      console.error(e)
-      alert('글 불러오기에 실패했습니다.')
+      console.error(e); alert('글 불러오기에 실패했습니다.')
     } finally {
       setIsLoading(false)
     }
   }
 
   useEffect(() => {
-    if (isAuthenticated) {
-      loadPosts()
-      // 실시간 새 글/댓글 반영(선택)
-      const postsSub = supabase
-        .channel('posts-change')
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'posts' }, () => {
-          loadPosts()
-        })
-        .subscribe()
-
-      const commentsSub = supabase
-        .channel('comments-change')
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'comments' }, () => {
-          // 목록의 댓글 수 갱신
-          loadPosts()
-          // 모달 열려 있으면 해당 게시글 댓글만 갱신
-          if (selectedPost) openComments(selectedPost, { keepOpen: true })
-        })
-        .subscribe()
-
-      return () => {
-        supabase.removeChannel(postsSub)
-        supabase.removeChannel(commentsSub)
-      }
+    if (!isAuthenticated) return
+    loadPosts()
+    const postsSub = supabase
+      .channel('posts-change')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'posts' }, () => loadPosts())
+      .subscribe()
+    const commentsSub = supabase
+      .channel('comments-change')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'comments' }, () => {
+        loadPosts()
+        if (selectedPost) openComments(selectedPost, { keepOpen: true })
+      })
+      .subscribe()
+    return () => {
+      supabase.removeChannel(postsSub)
+      supabase.removeChannel(commentsSub)
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAuthenticated])
 
-  // 새 글 추가
   const addPost = async () => {
-    if (!newPost.trim()) {
-      alert('내용을 입력해주세요!')
-      return
-    }
+    if (!newPost.trim()) { alert('내용을 입력해주세요!'); return }
     try {
       const { data, error } = await supabase
         .from('posts')
@@ -130,56 +93,34 @@ export default function CoupleDiary() {
         .select()
         .single()
       if (error) throw error
-
       const post = {
-        id: data.id,
-        author: data.author,
-        content: data.content,
-        timestamp: new Date(data.created_at).getTime(),
-        comments_count: 0
+        id: data.id, author: data.author, content: data.content,
+        timestamp: new Date(data.created_at).getTime(), comments_count: 0
       }
-      setPosts(prev => [post, ...prev])
-      setNewPost('')
+      setPosts(prev => [post, ...prev]); setNewPost('')
     } catch (e) {
-      console.error(e)
-      alert('글 저장에 실패했습니다. 다시 시도해주세요.')
+      console.error(e); alert('글 저장에 실패했습니다. 다시 시도해주세요.')
     }
   }
 
-  // 댓글 모달 열기(댓글 로드)
   const openComments = async (post, opts = {}) => {
     setSelectedPost({ ...post, comments: [] })
     try {
       const { data, error } = await supabase
-        .from('comments')
-        .select('*')
-        .eq('post_id', post.id)
-        .order('created_at', { ascending: true })
+        .from('comments').select('*').eq('post_id', post.id).order('created_at', { ascending: true })
       if (error) throw error
-
       const comments = (data || []).map(c => ({
-        id: c.id,
-        author: c.author,
-        content: c.content,
+        id: c.id, author: c.author, content: c.content,
         timestamp: new Date(c.created_at).getTime()
       }))
       setSelectedPost({ ...post, comments })
     } catch (e) {
-      console.error(e)
-      alert('댓글 불러오기에 실패했습니다.')
-    } finally {
-      if (!opts.keepOpen) {
-        // nothing
-      }
+      console.error(e); alert('댓글 불러오기에 실패했습니다.')
     }
   }
 
-  // 댓글 추가
   const addComment = async () => {
-    if (!newComment.trim()) {
-      alert('댓글을 입력해주세요!')
-      return
-    }
+    if (!newComment.trim()) { alert('댓글을 입력해주세요!'); return }
     try {
       const { data, error } = await supabase
         .from('comments')
@@ -187,25 +128,51 @@ export default function CoupleDiary() {
         .select()
         .single()
       if (error) throw error
-
       const comment = {
-        id: data.id,
-        author: data.author,
-        content: data.content,
+        id: data.id, author: data.author, content: data.content,
         timestamp: new Date(data.created_at).getTime()
       }
       const updated = { ...selectedPost, comments: [...(selectedPost?.comments || []), comment] }
       setSelectedPost(updated)
-
-      // 목록의 댓글 수 +1 반영
       setPosts(prev => prev.map(p => p.id === selectedPost.id
-        ? { ...p, comments_count: (p.comments_count || 0) + 1 }
-        : p
-      ))
+        ? { ...p, comments_count: (p.comments_count || 0) + 1 } : p))
       setNewComment('')
     } catch (e) {
-      console.error(e)
-      alert('댓글 저장에 실패했습니다. 다시 시도해주세요.')
+      console.error(e); alert('댓글 저장에 실패했습니다. 다시 시도해주세요.')
+    }
+  }
+
+  // ✅ 게시글 삭제
+  const deletePost = async (post) => {
+    if (!confirm('이 글을 삭제할까요? 댓글도 함께 삭제됩니다.')) return
+    try {
+      const { error } = await supabase.from('posts').delete().eq('id', post.id)
+      if (error) throw error
+      setPosts(prev => prev.filter(p => p.id !== post.id))
+      if (selectedPost?.id === post.id) setSelectedPost(null)
+    } catch (e) {
+      console.error(e); alert('글 삭제에 실패했습니다.')
+    }
+  }
+
+  // ✅ 댓글 삭제
+  const deleteComment = async (commentId) => {
+    if (!confirm('이 댓글을 삭제할까요?')) return
+    try {
+      const { error } = await supabase.from('comments').delete().eq('id', commentId)
+      if (error) throw error
+      // 모달 내 댓글 목록에서 제거
+      setSelectedPost(prev => {
+        if (!prev) return prev
+        const updated = { ...prev, comments: prev.comments.filter(c => c.id !== commentId) }
+        return updated
+      })
+      // 목록의 댓글 수 -1
+      setPosts(prev => prev.map(p =>
+        p.id === selectedPost?.id ? { ...p, comments_count: Math.max(0, (p.comments_count || 1) - 1) } : p
+      ))
+    } catch (e) {
+      console.error(e); alert('댓글 삭제에 실패했습니다.')
     }
   }
 
@@ -235,7 +202,7 @@ export default function CoupleDiary() {
             />
             <input
               type="password"
-              placeholder="******"
+              placeholder="비밀번호 6자리"
               value={secretCode}
               onChange={(e) => setSecretCode(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleLogin()}
@@ -255,7 +222,6 @@ export default function CoupleDiary() {
     )
   }
 
-  // 로딩
   if (isLoading) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-pink-50 via-purple-50 to-blue-50 flex items-center justify-center">
@@ -286,7 +252,7 @@ export default function CoupleDiary() {
         <div className="bg-white rounded-2xl shadow-lg p-6 mb-8">
           <h2 className="text-xl font-semibold text-gray-800 mb-4">새 글 남기기</h2>
           <textarea
-            placeholder="오늘의 하고 싶은 말 💕"
+            placeholder="오늘은 어떤 일이 있었나요? 💕"
             value={newPost}
             onChange={(e) => setNewPost(e.target.value)}
             rows={4}
@@ -312,16 +278,24 @@ export default function CoupleDiary() {
                     <h3 className="font-semibold text-lg text-gray-800">{post.author}</h3>
                     <p className="text-sm text-gray-400">{formatDate(post.timestamp)}</p>
                   </div>
+
+                  {/* ✅ 글 삭제 버튼 (작성자만 노출하고 싶으면 조건 추가: userName === post.author) */}
+                  <button
+                    onClick={() => deletePost(post)}
+                    className="text-gray-400 hover:text-red-500 transition-colors"
+                    title="글 삭제"
+                  >
+                    <Trash2 size={20} />
+                  </button>
                 </div>
+
                 <p className="text-gray-700 mb-4 whitespace-pre-wrap">{post.content}</p>
                 <button
                   onClick={() => openComments(post)}
                   className="flex items-center gap-2 text-purple-400 hover:text-purple-600 transition-colors"
                 >
                   <MessageCircle size={18} />
-                  <span className="text-sm">
-                    댓글 {post.comments_count ?? 0}개
-                  </span>
+                  <span className="text-sm">댓글 {post.comments_count ?? 0}개</span>
                 </button>
               </div>
             ))
@@ -357,7 +331,17 @@ export default function CoupleDiary() {
                   <div key={c.id} className="pl-4 border-l-2 border-pink-200">
                     <div className="flex items-start justify-between mb-1">
                       <p className="font-medium text-gray-800">{c.author}</p>
-                      <p className="text-xs text-gray-400">{formatDate(c.timestamp)}</p>
+                      <div className="flex items-center gap-3">
+                        <p className="text-xs text-gray-400">{formatDate(c.timestamp)}</p>
+                        {/* ✅ 댓글 삭제 버튼 (작성자만 노출하려면 userName === c.author 조건 추가) */}
+                        <button
+                          onClick={() => deleteComment(c.id)}
+                          className="text-gray-300 hover:text-red-500 transition-colors"
+                          title="댓글 삭제"
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      </div>
                     </div>
                     <p className="text-gray-600 text-sm">{c.content}</p>
                   </div>
